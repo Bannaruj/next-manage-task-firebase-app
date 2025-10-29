@@ -5,7 +5,8 @@ import Image from "next/image";
 import planning from "@/assets/planning.png";
 import Link from "next/link";
 import { firebasedb } from "@/lib/firebaseConfig";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
+import { supabase } from "@/lib/supabaseClient";
 
 type Task = {
   id: string;
@@ -43,27 +44,37 @@ function AllTaskPage() {
 
   async function handleDeleteTaskClick(id: string, image_url: string) {
     if (confirm("คุณต้องการลบงานนี้ใช่หรือไม่?")) {
-      try {
-        // ลบ task จากฐานข้อมูล
-        await fetch(`/api/tasks/${id}`, {
-          method: "DELETE",
-        });
+      //ลบรูปภาพออกจาก storage
+      if (image_url) {
+        const image_name = image_url.split("/").pop(); // เอา 'as string' ออกก็ได้ครับ
 
-        // ลบรูปภาพจาก storage (ถ้ามี)
-        if (image_url) {
-          await fetch(`/api/deleteImage`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ image_url }),
-          });
+        if (image_name) {
+          // เพิ่มการตรวจสอบว่า image_name ไม่ใช่ undefined
+          const { data, error } = await supabase.storage
+            .from("task_bk")
+            .remove([image_name]);
+
+          if (error) {
+            alert("พบปัญหาในการลบรูปภาพ");
+            console.error("Supabase delete error:", error.message);
+            return; // หยุดทำงานถ้าลบรูปไม่สำเร็จ
+          }
         }
+      }
 
-        // อัปเดต state
-        setTasks((prev) => prev.filter((task) => task.id !== id));
+      //ลบข้อมูลออกจากตาราง
+      try {
+        // *** FIX: แก้จาก "task" เป็น "tasks" ให้ตรงกับตอนดึงข้อมูล ***
+        await deleteDoc(doc(firebasedb, "tasks", id));
+
+        // (แนะนำ) อัปเดต UI ทันทีหลังลบสำเร็จ
+        setTasks(tasks.filter((task) => task.id !== id));
+
+        alert("ลบงานสำเร็จ"); // (ไม่บังคับ) แจ้งเตือนผู้ใช้
       } catch (error) {
-        console.error("ลบไม่สำเร็จ:", error);
+        // (แนะนำ) เพิ่มการจัดการ Error
+        alert("พบปัญหาในการลบข้อมูลงาน");
+        console.error("Firestore delete error: ", error);
       }
     }
   }

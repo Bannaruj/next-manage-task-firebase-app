@@ -5,6 +5,9 @@ import planning from "@/assets/planning.png";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
+import { getDoc, doc, updateDoc } from "firebase/firestore";
+import { firebasedb } from "@/lib/firebaseConfig";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function EditTaskPage() {
   // แก้ไขชื่อตัวแปรให้เป็นมาตรฐาน: rounter -> router
@@ -24,7 +27,23 @@ export default function EditTaskPage() {
 
   // ดึงข้อมูลจาก supabase มาแสดงที่หน้าจอตามid ที่ได้มากจากurl
   useEffect(() => {
-    async function fetchData() {}
+    async function fetchData() {
+      try {
+        const docRef = doc(firebasedb, "task", taskId as string);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setTitle(docSnap.data().title);
+          setDetail(docSnap.data().detail);
+          setIsComplete(docSnap.data().is_complete);
+          setPreviewFile(docSnap.data().image_url);
+          setOldImageFile(docSnap.data().image_url);
+        }
+      } catch (error) {
+        alert("พบปัญหาในการดึงข้อมูล");
+        console.log(error);
+        return;
+      }
+    }
 
     fetchData();
   }, [taskId]); // ใช้ taskId ใน dependency array
@@ -41,6 +60,50 @@ export default function EditTaskPage() {
 
   async function handleUploadAndUpdate(e: React.FormEvent) {
     e.preventDefault();
+
+    let image_url = old_image_file; // ตั้งค่าเริ่มต้นให้เป็น URL รูปภาพเดิม
+    let new_image_uploaded = false; // Flag สำหรับการตรวจสอบว่ามีการอัปโหลดรูปใหม่หรือไม่
+
+    // 1. ตรวจสอบและอัปโหลดรูปภาพใหม่
+    if (image_file) {
+      // อัปโหลดรูปไปที่ supabase ถ้ามีรูป
+      const new_image_file_name = `${Date.now()}-${image_file.name}`;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("task_bk")
+        .upload(new_image_file_name, image_file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (uploadError) {
+        alert("พบปัญหาในการอัปโหลดรูปภาพ: " + uploadError.message);
+        console.log(uploadError.message);
+        return;
+      } else {
+        const { data: publicUrlData } = supabase.storage
+          .from("task_bk")
+          .getPublicUrl(new_image_file_name);
+
+        image_url = publicUrlData.publicUrl;
+        new_image_uploaded = true;
+      }
+    }
+    try {
+      await updateDoc(doc(firebasedb, "tasks", taskId as string), {
+        title: title,
+        detail: detail,
+        is_complete: is_complete,
+        image_url: image_url,
+        update_at: new Date().toISOString(),
+      });
+      alert("แก้ไขข้อมูลเรียบร้อย");
+      router.push("/alltask");
+    } catch (error) {
+      alert("พบปัญหาในการแก้ไขข้อมูล");
+      console.log(error);
+      return;
+    }
   }
 
   return (
